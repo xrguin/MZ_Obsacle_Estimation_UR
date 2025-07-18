@@ -16,11 +16,9 @@ distance = 8;
 obs_state = 0;
 %%
 n = 0;
-
 turn_threshold = 0.2;
 recording = false;
-samples = 7000;
-
+samples = 1;
 apf_pq_r4 = cell(samples,2);
 detection_radius = 15;
 test_site_size = 15;
@@ -73,13 +71,11 @@ while n < samples
     % estm_poses3 = [];
     poses2 = [];
     poses3 = [];
-
     poses2_apf = [];
     poses3_apf = [];
 
   %  prevAngle2 = robot2.HeadAngle;
   %  prevAngle3 = robot3.HeadAngle;
-
 %%
     % Define sample time, and simulation time
     sampleTime = 0.1;
@@ -95,7 +91,6 @@ while n < samples
         robot2Pose = robot2.CurrentPose;
         robot3Pose = robot3.CurrentPose;
 
-
         if t == 0.5
             prevAngle2_1 = robot2.HeadAngle;
             prevAngle3_1 = robot3.HeadAngle;
@@ -107,8 +102,6 @@ while n < samples
         else
             prevAngle2 = robot2.HeadAngle;
             prevAngle3 = robot3.HeadAngle;
-        end
-
 %%
 
         % For ally robot and enemy robot
@@ -122,7 +115,6 @@ while n < samples
 
         robot3.Obstacle = obstaclePose3;
         robot3.artificial_potential_field(sampleTime,1,1.2);
-
 
         dTheta2 = abs(robot2.HeadAngle - prevAngle2);
         dTheta3 = abs(robot3.HeadAngle - prevAngle3);
@@ -139,7 +131,6 @@ while n < samples
         % 更新角度
        % prevAngle2 = robot2.HeadAngle;
        % prevAngle3 = robot3.HeadAngle;
-
 
 
 
@@ -215,10 +206,8 @@ while n < samples
 %     end
     
     n = n + 1;
-
     apf_pq_r4{n,1} = poses2_apf;
     apf_pq_r4{n,2} = poses3_apf;
-
     % allWaypoints_pq_r2{n,3} = estm_poses3;
     if mod(n, 1000) == 0
         fprintf('Completed Trials: %d\n', n);
@@ -226,14 +215,14 @@ while n < samples
 end
 end
 %%
-
+record_data = true;    
 if record_data
-    save("strict_apf_ally_turn.mat","apf_pq_r4")
+    save("C:/Users/10077/Desktop/nd research/code/MZ_Obsacle_Estimation_UR/strict_apf_ally_turn.mat","apf_pq_r4")
 end% Plot the results for 1 simulation for future use
 %%
 
-load('strict_apf_ally_turn.mat','apf_pq_r4')
-plotSample = 7000;
+load('C:/Users/10077/Desktop/nd research/code/MZ_Obsacle_Estimation_UR/strict_apf_ally_turn.mat','apf_pq_r4')
+plotSample = 1;
 poses2_1 = apf_pq_r4{plotSample,1};
 poses3_1 = apf_pq_r4{plotSample,2};
 robot2_1 = MbRobot;
@@ -250,7 +239,6 @@ plot(poses2_1(1,:),poses2_1(2,:),'-',...
                 'Color',[0,1,0],'LineWidth',1);   % Orange: [1 0.5 0]
 hold on
 plot(poses3_1(1,:),poses3_1(2,:),'-',...
-
                 'Color',[0,0,1],'LineWidth',1);
 plot(robot2.Start(1),robot2.Start(2),'ko','MarkerSize',10,'MarkerFaceColor','g')
 plot(robot2.Goal(1),robot2.Goal(2),'kp','MarkerSize',10,'MarkerFaceColor','g')
