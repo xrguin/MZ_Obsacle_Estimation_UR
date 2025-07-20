@@ -35,6 +35,7 @@ StaticObstacleInfo(3,2) = radius;
 r_a = 1;
 n = 0;
 samples = 1;
+cbf_pq_r4 = cell(samples,2);
 detection_radius = 6;
 sampleTime = 0.1;
 
@@ -45,7 +46,7 @@ mpc_dt = sampleTime;  % MPC time step
 window_len = 10;
 
 animation = true;
-record_video = true;
+record_video = false;
 
 h_fig = figure('Name', 'Robot Navigation Animation', 'Position', [100, 100, 600, 1200]);
 set(gcf, 'DoubleBuffer', 'on');
@@ -195,7 +196,8 @@ while n < samples
             robot3States = [robot3States, [t;robot3.CurrentPose; robot3.Velocity]];
         end
 
-
+        robot2Poses = [robot2Poses,robot2.CurrentPose];
+        robot3Poses = [robot3Poses,robot3.CurrentPose];
 
         if animation
             
@@ -244,7 +246,17 @@ while n < samples
 
 
     n = n + 1;
+    cbf_pq_r4{n,1} = robot2Poses;
+    cbf_pq_r4{n,2} = robot3Poses;
+    if mod(n, 1000) == 0
+        fprintf('Completed Trials: %d\n', n);
+    end
 end
+
+record_data = true;    
+if record_data
+    save("C:/Users/10077/Desktop/nd research/code/MZ_Obsacle_Estimation_UR/strict_cbf_ally_turn.mat","cbf_pq_r4")
+end% Plot the results for 1 simulation for future use
 
 if record_video
     frame = getframe(gcf);
@@ -257,95 +269,95 @@ if animation && record_video
 end
 
 %%
-figure
-subplot(2,3,[1 4])
-plot(robot2States(2,:), robot2States(3,:),'DisplayName','Ally Trajectory', ...
-    'Color',[0 1 0], 'LineWidth', 1.5)
-hold on
-plot(robot3States(2,:), robot3States(3,:),'DisplayName','Enemy Trajectory', ...
-    'Color',[0 0 1], 'LineWidth', 1.5)
-xlabel('X Coord')
-ylabel('Y Coord')
-xlim([0, 15])
-ylim([0, 30])
-legend
-grid on
-set(gca, 'FontSize',15)
+%figure
+%subplot(2,3,[1 4])
+%plot(robot2States(2,:), robot2States(3,:),'DisplayName','Ally Trajectory', ...
+%    'Color',[0 1 0], 'LineWidth', 1.5)
+%hold on
+%plot(robot3States(2,:), robot3States(3,:),'DisplayName','Enemy Trajectory', ...
+%    'Color',[0 0 1], 'LineWidth', 1.5)
+%xlabel('X Coord')
+%ylabel('Y Coord')
+%xlim([0, 15])
+%ylim([0, 30])
+%legend
+%grid on
+%set(gca, 'FontSize',15)
 
-subplot(2,3,[2,3])
-plot(robot2States(1,:), robot2States(end,:),'DisplayName','Ally Speed', ...
-    'Color',[0 1 0], 'LineWidth', 1.5)
-xlabel('Time (s)')
-ylabel('Velocity (p.u./s)')
-grid on
-set(gca, 'FontSize',15)
+%subplot(2,3,[2,3])
+%plot(robot2States(1,:), robot2States(end,:),'DisplayName','Ally Speed', ...
+%    'Color',[0 1 0], 'LineWidth', 1.5)
+%xlabel('Time (s)')
+%ylabel('Velocity (p.u./s)')
+%grid on
+%set(gca, 'FontSize',15)
 
-subplot(2,3,[5,6])
-plot(robot3States(1,:), robot3States(end,:),'DisplayName','Adversarial Speed', ...
-    'Color',[0 0 1], 'LineWidth', 1.5)
-xlabel('Time (s)')
-ylabel('Velocity (p.u./s)')
-grid on
-set(gca, 'FontSize',15)
+%subplot(2,3,[5,6])
+%plot(robot3States(1,:), robot3States(end,:),'DisplayName','Adversarial Speed', ...
+%    'Color',[0 0 1], 'LineWidth', 1.5)
+%xlabel('Time (s)')
+%ylabel('Velocity (p.u./s)')
+%grid on
+%set(gca, 'FontSize',15)
 
 %%
 % assume robot2States and robot3States are [time; x; y; …; speed] layouts:
 t2 = robot2States(1,:);   x2 = robot2States(2,:);   y2 = robot2States(3,:);   v2 = robot2States(end,:);
 t3 = robot3States(1,:);   v3 = robot3States(end,:);
 
-figure('Position',[100 100 1200 600]);
+%figure('Position',[100 100 1200 600]);
 
 % — Left: big trajectory plot — %
-subplot(2,3,[1 4])
-hA = plot(x2, y2, 'g-', 'LineWidth',1.5); hold on;
-hE = plot(robot3States(2,:), robot3States(3,:), 'b-', 'LineWidth',1.5);
-hDot = plot(NaN, NaN, 'go','MarkerFaceColor','r','MarkerSize',8);
-hDot_ad = plot(NaN, NaN, 'bo','MarkerFaceColor','r','MarkerSize',8);
-xlabel('X Coord'); ylabel('Y Coord'); 
-xlim([0 15]); ylim([0 30]); grid on; set(gca,'FontSize',15)
-legend([hA hE],{'Ally Traj','Enemy Traj'});
+%subplot(2,3,[1 4])
+%hA = plot(x2, y2, 'g-', 'LineWidth',1.5); hold on;
+%hE = plot(robot3States(2,:), robot3States(3,:), 'b-', 'LineWidth',1.5);
+%hDot = plot(NaN, NaN, 'go','MarkerFaceColor','r','MarkerSize',8);
+%hDot_ad = plot(NaN, NaN, 'bo','MarkerFaceColor','r','MarkerSize',8);
+%xlabel('X Coord'); ylabel('Y Coord'); 
+%xlim([0 15]); ylim([0 30]); grid on; set(gca,'FontSize',15)
+%legend([hA hE],{'Ally Traj','Enemy Traj'});
 
 % — Top-right: ally speed — %
-subplot(2,3,[2 3])
-hV2 = plot(t2, v2, 'g-','LineWidth',1.5); hold on;
-ylim2 = ylim;
-hLine2 = plot([t2(1) t2(1)], ylim2, 'r--','LineWidth',1.5);
-xlabel('Time (s)'); ylabel('Velocity (p.u./s)');
-grid on; set(gca,'FontSize',15)
+%subplot(2,3,[2 3])
+%hV2 = plot(t2, v2, 'g-','LineWidth',1.5); hold on;
+%ylim2 = ylim;
+%hLine2 = plot([t2(1) t2(1)], ylim2, 'r--','LineWidth',1.5);
+%xlabel('Time (s)'); ylabel('Velocity (p.u./s)');
+%grid on; set(gca,'FontSize',15)
 
 % — Bottom-right: adversarial speed — %
-subplot(2,3,[5 6])
-hV3 = plot(t3, v3, 'b-','LineWidth',1.5); hold on;
-ylim3 = ylim;
-hLine3 = plot([t3(1) t3(1)], ylim3, 'r--','LineWidth',1.5);
-xlabel('Time (s)'); ylabel('Velocity (p.u./s)');
-grid on; set(gca,'FontSize',15)
+%subplot(2,3,[5 6])
+%hV3 = plot(t3, v3, 'b-','LineWidth',1.5); hold on;
+%ylim3 = ylim;
+%hLine3 = plot([t3(1) t3(1)], ylim3, 'r--','LineWidth',1.5);
+%xlabel('Time (s)'); ylabel('Velocity (p.u./s)');
+%grid on; set(gca,'FontSize',15)
 
 % — Animation loop — %
-nFrames = numel(t2);          % assume t2 and t3 have same length
-dt = mean(diff(t2));          % approximate time per frame
-for k = 1:nFrames
-    % update dot on trajectory
-    set(hDot, 'XData', x2(k), 'YData', y2(k))
-    try
-        set(hDot_ad, 'XData', x3(k), 'YData', y3(k))
-    catch
-    end
+%nFrames = numel(t2);          % assume t2 and t3 have same length
+%dt = mean(diff(t2));          % approximate time per frame
+%for k = 1:nFrames
+ %   % update dot on trajectory
+%    set(hDot, 'XData', x2(k), 'YData', y2(k))
+%    try
+%        set(hDot_ad, 'XData', x3(k), 'YData', y3(k))
+%    catch
+ %   end
     
-    % update vertical lines on the speed plots
-    try
-        set(hLine2, 'XData', [t2(k) t2(k)])
-    catch
-    end
+%    % update vertical lines on the speed plots
+ %   try
+ %       set(hLine2, 'XData', [t2(k) t2(k)])
+%    catch
+%    end
 
-    try
-        set(hLine3, 'XData', [t3(k) t3(k)])
-    catch
-    end
+ %   try
+ %       set(hLine3, 'XData', [t3(k) t3(k)])
+ %   catch
+ %   end
     
-    drawnow
-    pause(dt)   % slow it down to real time; omit or reduce for faster playback
-end
+ %   drawnow
+%    pause(dt)   % slow it down to real time; omit or reduce for faster playback
+%end
 
 
 

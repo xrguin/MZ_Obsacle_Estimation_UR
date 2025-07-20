@@ -5,16 +5,16 @@ clear
 close all
 % Program Functions
 todayDate = datestr(datetime('today'), 'yyyy-mm-dd');
-doTrain = false;
+doTrain = true;
 newShuffle = true;
 %% 
 % Prepare Data
 
-load('Data/SimulationData/apf_ally_turn.mat','apf_pq_r4')
+load("C:\Users\10077\Desktop\nd research\code\MZ_Obsacle_Estimation_UR\strict_apf_ally_turn.mat",'apf_pq_r4')
 
 % Transpose the elements in the dataset from a shape of 3xn to nx3, make it
 % the same as the MATLAB example
-raw_data = cell(4000,2);
+raw_data = cell(7000,2);
 for i = 1:size(apf_pq_r4, 1)
     for j = 1:size(apf_pq_r4, 2)
         % Transpose the 3xN matrix to Nx3
@@ -122,26 +122,26 @@ TTest= cell2mat(shuffledData(iTest,2));
 % Normalize the data
 
 % Normalize
-% muX_train = mean(cell2mat(XTrain));
-% sigmaX_train = std(cell2mat(XTrain),0);
+ muX_train = mean(cell2mat(XTrain));
+ sigmaX_train = std(cell2mat(XTrain),0);
 % 
-% muT_train = mean(TTrain);
-% sigmaT_train = std(TTrain,0);
+ muT_train = mean(TTrain);
+ sigmaT_train = std(TTrain,0);
 % 
-% for n = 1:numel(XTrain)
-%     XTrain_norm{n} = (XTrain{n} - muX_train) ./ sigmaX_train;
-%     TTrain_norm(n,:) = (TTrain(n,:) - muT_train) ./ sigmaT_train;
-% end
+ for n = 1:numel(XTrain)
+     XTrain_norm{n} = (XTrain{n} - muX_train) ./ sigmaX_train;
+     TTrain_norm(n,:) = (TTrain(n,:) - muT_train) ./ sigmaT_train;
+ end
 % 
-% for n = 1:numel(XVal)
-%     XVal_norm{n} = (XVal{n} - muX_train) ./ sigmaX_train;
-%     TVal_norm(n,:) = (TVal(n,:) - muT_train) ./ sigmaT_train;
-% end
+ for n = 1:numel(XVal)
+     XVal_norm{n} = (XVal{n} - muX_train) ./ sigmaX_train;
+     TVal_norm(n,:) = (TVal(n,:) - muT_train) ./ sigmaT_train;
+ end
 % 
-% for n = 1:numel(XTest)
-%     XTest_norm{n} = (XTest{n} - muX_train) ./ sigmaX_train;
-%     TTest_norm(n,:) = (TTest(n,:) - muT_train) ./ sigmaT_train;
-% end
+ for n = 1:numel(XTest)
+     XTest_norm{n} = (XTest{n} - muX_train) ./ sigmaX_train;
+     TTest_norm(n,:) = (TTest(n,:) - muT_train) ./ sigmaT_train;
+ end
 
 %% 
 % Train the network
@@ -162,10 +162,11 @@ if doTrain
         lstmLayer(128, 'OutputMode', 'last')
         fullyConnectedLayer(numOutputs)
         ];
+    
 
     % layerGraph(layers)
     options = trainingOptions('adam', ...
-        'ExecutionEnvironment','gpu',...
+        'ExecutionEnvironment','cpu',...
         MaxEpochs=500, ...
         MiniBatchSize=128,...
         InitialLearnRate=0.001,...
@@ -180,7 +181,7 @@ if doTrain
         ValidationData={XVal,TVal});
     %% Train Recurrent Neural Network
     multiSliceNet_mw9 = trainnet(XTrain, TTrain, layers, 'mse',options);
-    save('Data/Network/Sliced_strict_apf.mat','multiSliceNet')
+    save('C:/Users/10077/Desktop/nd research/code/MZ_Obsacle_Estimation_UR/Sliced_strict_apf_1.mat','multiSliceNet')
 end
 %%
 % load('Data/Network/Sliced_strict_apf_mw9.mat','multiSliceNet_mw9')

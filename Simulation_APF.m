@@ -5,7 +5,7 @@ clear
 close all
 %%
 % Test Settings
-annimation = true;
+annimation = false;
 simulation = true;
 record_data = false;
 %%
@@ -18,7 +18,7 @@ obs_state = 0;
 n = 0;
 turn_threshold = 0.2;
 recording = false;
-samples = 7000;
+samples = 1;
 apf_pq_r4 = cell(samples,2);
 detection_radius = 15;
 test_site_size = 15;
@@ -223,7 +223,7 @@ end% Plot the results for 1 simulation for future use
 %%
 
 load('C:/Users/10077/Desktop/nd research/code/MZ_Obsacle_Estimation_UR/strict_apf_ally_turn.mat','apf_pq_r4')
-plotSample = 7000;
+plotSample = 1;
 poses2_1 = apf_pq_r4{plotSample,1};
 poses3_1 = apf_pq_r4{plotSample,2};
 robot2_1 = MbRobot;
