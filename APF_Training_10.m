@@ -5,16 +5,16 @@ clear
 close all
 % Program Functions
 todayDate = datestr(datetime('today'), 'yyyy-mm-dd');
-doTrain = false;
+doTrain = true;
 newShuffle = true;
 %% 
 % Prepare Data
 
-load('Data/SimulationData/apf_ally_turn.mat','apf_pq_r4')
+load('strict_apf_ally_turn.mat','apf_pq_r4')
 
 % Transpose the elements in the dataset from a shape of 3xn to nx3, make it
 % the same as the MATLAB example
-raw_data = cell(4000,2);
+raw_data = cell(7000,2);
 for i = 1:size(apf_pq_r4, 1)
     for j = 1:size(apf_pq_r4, 2)
         % Transpose the 3xN matrix to Nx3
@@ -122,26 +122,26 @@ TTest= cell2mat(shuffledData(iTest,2));
 % Normalize the data
 
 % Normalize
-% muX_train = mean(cell2mat(XTrain));
-% sigmaX_train = std(cell2mat(XTrain),0);
+muX_train = mean(cell2mat(XTrain));
+sigmaX_train = std(cell2mat(XTrain),0);
 % 
-% muT_train = mean(TTrain);
-% sigmaT_train = std(TTrain,0);
+muT_train = mean(TTrain);
+sigmaT_train = std(TTrain,0);
 % 
-% for n = 1:numel(XTrain)
-%     XTrain_norm{n} = (XTrain{n} - muX_train) ./ sigmaX_train;
-%     TTrain_norm(n,:) = (TTrain(n,:) - muT_train) ./ sigmaT_train;
-% end
+for n = 1:numel(XTrain)
+    XTrain_norm{n} = (XTrain{n} - muX_train) ./ sigmaX_train;
+    TTrain_norm(n,:) = (TTrain(n,:) - muT_train) ./ sigmaT_train;
+end
 % 
-% for n = 1:numel(XVal)
-%     XVal_norm{n} = (XVal{n} - muX_train) ./ sigmaX_train;
-%     TVal_norm(n,:) = (TVal(n,:) - muT_train) ./ sigmaT_train;
-% end
+for n = 1:numel(XVal)
+    XVal_norm{n} = (XVal{n} - muX_train) ./ sigmaX_train;     
+    TVal_norm(n,:) = (TVal(n,:) - muT_train) ./ sigmaT_train;
+end
 % 
-% for n = 1:numel(XTest)
-%     XTest_norm{n} = (XTest{n} - muX_train) ./ sigmaX_train;
-%     TTest_norm(n,:) = (TTest(n,:) - muT_train) ./ sigmaT_train;
-% end
+for n = 1:numel(XTest)
+    XTest_norm{n} = (XTest{n} - muX_train) ./ sigmaX_train;
+    TTest_norm(n,:) = (TTest(n,:) - muT_train) ./ sigmaT_train;
+end
 
 %% 
 % Train the network
@@ -165,25 +165,130 @@ if doTrain
 
     % layerGraph(layers)
     options = trainingOptions('adam', ...
-        'ExecutionEnvironment','gpu',...
-        MaxEpochs=500, ...
-        MiniBatchSize=128,...
-        InitialLearnRate=0.001,...
-        LearnRateSchedule='piecewise',...
-        LearnRateDropPeriod=100,...
-        LearnRateDropFactor=0.2,...
-        SequencePaddingDirection='left',...
-        Shuffle='every-epoch',...
-        GradientThreshold=0.5,...
-        Verbose=true,...
-        Plots='training-progress',...
-        ValidationData={XVal,TVal});
+    'ExecutionEnvironment','gpu',...
+    'MaxEpochs',500, ...
+    'MiniBatchSize',128,...
+    'InitialLearnRate',0.001,...
+    'LearnRateSchedule','piecewise',...
+    'LearnRateDropPeriod',100,...
+    'LearnRateDropFactor',0.2,...
+    'SequencePaddingDirection','left',...
+    'Shuffle','every-epoch',...
+    'GradientThreshold',0.5,...
+    'Verbose',true,...
+    'Plots','training-progress',...
+    'ValidationData',{XVal_norm,TVal_norm},...
+    'ValidationFrequency',50,...        % 每30个小批量进行一次验证
+    'ValidationPatience',1000,...         % 早停机制：5次无提升则停止
+    'CheckpointPath',pwd,...           % 保存检查点的路径
+    'OutputFcn',@customTrainingMonitor); % 自定义早停函数;             % 保存检查点的路径
     %% Train Recurrent Neural Network
-    multiSliceNet_mw9 = trainnet(XTrain, TTrain, layers, 'mse',options);
-    save('Data/Network/Sliced_strict_apf.mat','multiSliceNet')
+    multiSliceNet_mw9 = trainnet(XTrain_norm, TTrain_norm, layers, 'mse',options);
+    
+    % Create structure to store network and training data
+    trainedModel = struct();
+    trainedModel.net = multiSliceNet_mw9;
+    trainedModel.normParams = struct();
+    trainedModel.normParams.muX = muX_train;
+    trainedModel.normParams.sigmaX = sigmaX_train;
+    trainedModel.normParams.muT = muT_train;
+    trainedModel.normParams.sigmaT = sigmaT_train;
+    trainedModel.trainingInfo = struct();
+    trainedModel.trainingInfo.offset = offset;
+    trainedModel.trainingInfo.numChannels = numChannels;
+    trainedModel.trainingInfo.numOutputs = numOutputs;
+    trainedModel.trainingInfo.trainDate = datestr(now);
+    trainedModel.trainingInfo.dataSize = struct();
+    trainedModel.trainingInfo.dataSize.train = numel(XTrain);
+    trainedModel.trainingInfo.dataSize.val = numel(XVal);
+    trainedModel.trainingInfo.dataSize.test = numel(XTest);
+    
+    % Test the network on the test set
+    fprintf('\n===== Evaluating on Test Set =====\n');
+    
+    % Predict on test set (cell array input)
+    YTest_pred = zeros(numel(XTest_norm), 2);
+    for i = 1:numel(XTest_norm)
+        YTest_pred(i,:) = predict(multiSliceNet_mw9, XTest_norm{i});
+    end
+    
+    % Denormalize predictions
+    YTest_denorm = YTest_pred .* sigmaT_train + muT_train;
+    
+    % Calculate test metrics
+    testMSE = mean((YTest_denorm - TTest).^2, 'all');
+    testRMSE = sqrt(testMSE);
+    testMAE = mean(abs(YTest_denorm - TTest), 'all');
+    
+    % Calculate R-squared
+    SS_tot = sum((TTest - mean(TTest, 1)).^2, 'all');
+    SS_res = sum((TTest - YTest_denorm).^2, 'all');
+    R2 = 1 - (SS_res / SS_tot);
+    
+    fprintf('Test MSE: %.6f\n', testMSE);
+    fprintf('Test RMSE: %.6f\n', testRMSE);
+    fprintf('Test MAE: %.6f\n', testMAE);
+    fprintf('Test R²: %.4f\n', R2);
+    
+    % Store test results in the model structure
+    trainedModel.testResults = struct();
+    trainedModel.testResults.MSE = testMSE;
+    trainedModel.testResults.RMSE = testRMSE;
+    trainedModel.testResults.MAE = testMAE;
+    trainedModel.testResults.R2 = R2;
+    trainedModel.testResults.predictions = YTest_denorm;
+    trainedModel.testResults.actual = TTest;
+    
+    % Plot test results
+    figure('Name', 'Test Set Performance');
+    subplot(2,2,1);
+    scatter(TTest(:,1), YTest_denorm(:,1), 10, 'filled');
+    hold on;
+    plot(xlim, xlim, 'r--', 'LineWidth', 2);
+    xlabel('Actual X');
+    ylabel('Predicted X');
+    title('X Coordinate Predictions');
+    grid on;
+    
+    subplot(2,2,2);
+    scatter(TTest(:,2), YTest_denorm(:,2), 10, 'filled');
+    hold on;
+    plot(xlim, xlim, 'r--', 'LineWidth', 2);
+    xlabel('Actual Y');
+    ylabel('Predicted Y');
+    title('Y Coordinate Predictions');
+    grid on;
+    
+    subplot(2,2,3);
+    histogram(TTest(:,1) - YTest_denorm(:,1), 50);
+    xlabel('Error (Actual - Predicted)');
+    ylabel('Frequency');
+    title('X Coordinate Error Distribution');
+    grid on;
+    
+    subplot(2,2,4);
+    histogram(TTest(:,2) - YTest_denorm(:,2), 50);
+    xlabel('Error (Actual - Predicted)');
+    ylabel('Frequency');
+    title('Y Coordinate Error Distribution');
+    grid on;
+    
+    sgtitle(sprintf('Test Set Performance (RMSE: %.4f, R²: %.4f)', testRMSE, R2));
+    
+    save('Sliced_strict_apf_net1_norm.mat','trainedModel')
+    fprintf('===================================\n\n');
 end
 %%
-% load('Data/Network/Sliced_strict_apf_mw9.mat','multiSliceNet_mw9')
+% Load the trained model structure
+if ~doTrain
+    load('Sliced_strict_apf_net1_norm.mat','trainedModel')
+    multiSliceNet_mw9 = trainedModel.net;
+    muX_train = trainedModel.normParams.muX;
+    sigmaX_train = trainedModel.normParams.sigmaX;
+    muT_train = trainedModel.normParams.muT;
+    sigmaT_train = trainedModel.normParams.sigmaT;
+    offset = trainedModel.trainingInfo.offset;
+end
 
 Xmoving_window = zeros(offset,3);
 Tmoving_window = zeros(1,2);
@@ -218,9 +323,19 @@ for t = 1:numPredictionTimeSteps-1
     % then store as an input data
     Xmoving_window = allydata(t:t+offset,1:3);
     Tmoving_window = enemydata(t+offset+1,1:2);
-    XTrajTest{j} = Xmoving_window;
+    
+    % Normalize the input data before prediction
+    Xmoving_window_norm = (Xmoving_window - muX_train) ./ sigmaX_train;
+    
+    XTrajTest{j} = Xmoving_window_norm;
     TTrajTest{j} = Tmoving_window;
-    [Y_reg(t,:),state] = predict(multiSliceNet_mw9,XTrajTest{j});
+    
+    % Predict with normalized input
+    [Y_norm(t,:),state] = predict(multiSliceNet_mw9,XTrajTest{j});
+    
+    % Denormalize the output
+    Y_reg(t,:) = Y_norm(t,:) .* sigmaT_train + muT_train;
+    
     multiSliceNet_mw9.resetState();
     j = j + 1;
     
@@ -238,7 +353,6 @@ for t = 1:numPredictionTimeSteps-1
     end
     
 end
-% Y_reg = Y_norm .* sigmaT_train + muT_train;
 %%
 numWindows = size(allydata, 1) - offset;
 validWindows = false(numWindows, 1);
@@ -309,3 +423,43 @@ hold on
 plot(allydata(1:75,1),allydata(1:75,2))
 plot(enemydata(:,1),enemydata(:,2))
 hold off
+
+function [stop, options] = customTrainingMonitor(trainingState, options)
+    persistent bestValidationLoss bestEpoch epochsWithoutImprovement
+    
+    % 初始化持久变量
+    if isempty(bestValidationLoss)
+        bestValidationLoss = inf;
+        bestEpoch = 0;
+        epochsWithoutImprovement = 0;
+    end
+    
+    % 仅在验证时执行
+    if ~isempty(trainingState.ValidationLoss)
+        % 检查当前验证损失
+        if trainingState.ValidationLoss < bestValidationLoss
+            % 保存最佳模型
+            bestValidationLoss = trainingState.ValidationLoss;
+            bestEpoch = trainingState.Epoch;
+            epochsWithoutImprovement = 0;
+            
+            % 保存当前最佳模型
+            save(fullfile(pwd, 'bestModelCheckpoint.mat'), 'trainingState');
+            fprintf('Epoch %d: 新的最佳验证损失 - %.6f\n', trainingState.Epoch, trainingState.ValidationLoss);
+        else
+            % 记录没有提升的轮数
+            epochsWithoutImprovement = epochsWithoutImprovement + 1;
+            fprintf('Epoch %d: 验证损失未改善 (最佳: %.6f, 持续 %d 轮)\n', ...
+                trainingState.Epoch, bestValidationLoss, epochsWithoutImprovement);
+        end
+        
+        % 判断是否应该停止训练
+        if epochsWithoutImprovement >= 1000 && bestValidationLoss < 5
+            fprintf('早停触发: 验证损失连续 %d 轮没有改善\n', epochsWithoutImprovement);
+            stop = true;
+            return;
+        end
+    end
+    
+    stop = false;
+end

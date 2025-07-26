@@ -1,0 +1,42 @@
+# MATLAB checkpoint files
+net_checkpoint__*.mat
+bestModelCheckpoint.mat
+
+# MATLAB autosave files
+*.asv
+
+# Video files
+*.avi
+*.mp4
+
+# Test results
+test_results.mat
+
+# Temporary MATLAB files
+*.m~
+
+# Large data files (uncomment if needed)
+# *.mat
+
+# Specific large model files that shouldn't be tracked
+# Sliced_strict_apf_net1.mat
+# Sliced_strict_apf_net1_norm.mat
+# strict_apf_ally_turn_1.mat
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Log files
+*.log

@@ -1,4 +1,10 @@
 % Last Modified: 5/21/2024
+% Updated: 7/24/2025 - Modified to use normalized model (Sliced_strict_apf_net1_norm.mat)
+% - Added normalization of input data before prediction
+% - Added denormalization of output data after prediction
+% - Added speed filtering: removes predictions with speed > 1.5x actual robot3 speed
+%   (only applies when robot3 speed < 0.5 to avoid filtering during normal movement)
+% - Added individual video saving: each sample saves as separate MP4 file in current folder
 %%
 clc
 clear
@@ -10,18 +16,63 @@ r_d = 0;
 distance = 8;
 %%
 n = 1;
-samples = 5;
+samples = 1;
 augmented_pq_r4 = cell(samples,2);
 annimation = true;
 record_collision_condition = true;
 
 test_site_size = 15;
 
-load('Sliced_No_Seg_apf_3layer.mat','multiSliceNet')
+% Load the normalized model and extract network and normalization parameters
+fprintf('Loading normalized trained model...\n');
+load('Sliced_strict_apf_net1_norm.mat', 'trainedModel');
+multiSliceNet = trainedModel.net;  % Extract the network
+
+% Extract normalization parameters from the model
+muX_train = trainedModel.normParams.muX;
+sigmaX_train = trainedModel.normParams.sigmaX;
+muT_train = trainedModel.normParams.muT;
+sigmaT_train = trainedModel.normParams.sigmaT;
+
+fprintf('Loaded normalization parameters:\n');
+fprintf('Input norm - Mean: [%.4f, %.4f, %.4f], Std: [%.4f, %.4f, %.4f]\n', ...
+    muX_train, sigmaX_train);
+fprintf('Output norm - Mean: [%.4f, %.4f], Std: [%.4f, %.4f]\n', ...
+    muT_train, sigmaT_train);
 
 collision_conditions_mz = {};
 
+% 设置视频保存
+save_video = true;  % 是否保存视频
+video_folder = pwd;  % 使用当前文件夹
+if ~exist(video_folder, 'dir')
+    mkdir(video_folder);  % 如果没有该文件夹则创建
+end
+
 while n <= samples
+    
+    % 为每个样本创建单独的视频文件
+    if save_video
+        timestamp = datestr(now, 'yyyymmdd_HHMMSS');
+        % 尝试使用不同的视频格式
+        try
+            % 首先尝试 MPEG-4
+            video_filename = fullfile(video_folder, sprintf('demo_sample_%d_%s.mp4', n, timestamp));
+            v = VideoWriter(video_filename, 'MPEG-4');
+        catch
+            try
+                % 如果 MPEG-4 不可用，尝试 Motion JPEG AVI
+                video_filename = fullfile(video_folder, sprintf('demo_sample_%d_%s.avi', n, timestamp));
+                v = VideoWriter(video_filename, 'Motion JPEG AVI');
+            catch
+                % 如果都不行，使用默认格式
+                video_filename = fullfile(video_folder, sprintf('demo_sample_%d_%s.avi', n, timestamp));
+                v = VideoWriter(video_filename);
+            end
+        end
+        v.FrameRate = 10;  % 每秒帧数
+        open(v);
+    end
 
     %======Comment this section to test use saved initial locations========
     rng('shuffle')
@@ -102,37 +153,6 @@ while n <= samples
         robot1.CurrentCoord = robot1.CurrentPose(1:2);
         robot1.DetectionRadius = 15;
 
-            % === Generate second ego robot: robot4 ===
-        robot4 = MbRobot;
-        robot4.name = 'Ego2';
-
-        [robot4.Start, robot4.Goal] = generateEgoRobotPatha(robot1.Start,robot2.Start, robot3.Start, ...
-            interceptPoint,test_site_size,robot3.SafeRadius);
-
-        % 保证robot4的起点不与robot1、robot2、robot3重合
-      %  existing_positions = [robot1.Start; robot2.Start; robot3.Start];
-      %  while true
-      %      candidateStart = rand(1,2)*test_site_size;
-      %      if all(vecnorm(existing_positions - candidateStart, 2, 2) > robot1.SafeRadius)
-      %          break;
-       %     end
-        %end
-
-        % 生成一个足够远的goal
-       % robot4.Start = candidateStart;
-       % robot4.Goal = generateRandomCoords(1, robot4.Start, distance, test_site_size);
-
-        lightColor1 = [255, 178, 102]/255 ; 
-        robot4.LightColor = lightColor1;
-        robot4.DarkColor = lightColor1;
-        robot4.SafeRadius = r_a;
-        robot4.HeadAngle = atan2(robot4.Goal(2) - robot4.Start(2), ...
-                              robot4.Goal(1) - robot4.Start(1));
-        robot4.CurrentPose = [robot4.Start'; robot4.HeadAngle; robot4.AngularVelocity];
-        robot4.CurrentCoord = robot4.CurrentPose(1:2);
-        robot4.DetectionRadius = 15;
-
-
         %==============================================================================
         collision_conditions_mz{n,1} = robot1.Start;
         collision_conditions_mz{n,2} = robot1.Goal;
@@ -140,11 +160,9 @@ while n <= samples
         collision_conditions_mz{n,4} = robot2.Goal;
         collision_conditions_mz{n,5} = robot3.Start;
         collision_conditions_mz{n,6} = robot3.Goal;
-        collision_conditions_mz{n,7} = robot4.Start;
-        collision_conditions_mz{n,8} = robot4.Goal;
     
         % Record if ego robot has collided with any other agnet
-        collision_conditions_mz{n,9} = 0;
+        collision_conditions_mz{n,7} = 0;
         % % Record the average prediction error 
         % collision_conditions_mz{n,8} = 0;
 %%
@@ -153,7 +171,6 @@ while n <= samples
         poses1 = [];
         poses2 = [];
         poses3 = [];
-        poses4 = [];
 %%
         % Define sample time, and simulation time
         sampleTime = 0.1;
@@ -167,6 +184,13 @@ while n <= samples
         filo_length = 5;  % Length of the moving average window
         buffer = zeros(filo_length,2);  % Circular buffer for moving average
         buffer_sum = [0,0];  % Sum of values in the buffer
+        
+        % Variables for speed filtering
+        prevRobot3Pos = [];  % Store previous actual robot3 position
+        prevPredictedPos = [];  % Store previous predicted position
+        prevFilteredPos = [];  % Store previous filtered position
+        speedThresholdMultiplier = 1.5;  % Threshold = 1.5 × actual robot3 speed
+        minSpeedForFiltering = 0.5;  % Only apply filtering when robot3 speed < this value
 %%
      % Simulation Loop
         for t = 0:sampleTime:simulationTime
@@ -174,7 +198,6 @@ while n <= samples
             robot1Pose = robot1.CurrentPose;  
             robot2Pose = robot2.CurrentPose;
             robot3Pose = robot3.CurrentPose;
-            robot4Pose = robot4.CurrentPose;
             if t == sampleTime
                 robot2Pose(4) = 0;
                 robot3Pose(4) = 0;
@@ -182,9 +205,8 @@ while n <= samples
             poses2 = [poses2, [robot2Pose; t]];
             poses3 = [poses3, [robot3Pose; t]];
             poses1 = [poses1, [robot1Pose; t]];
-            poses4 = [poses4, [robot4Pose; t]];
             
-            obstaclePose2 = [robot3Pose(1:2,:),robot4Pose(1:2,:),robot1Pose(1:2,:)];
+            obstaclePose2 = [robot3Pose(1:2,:)];
             obstaclePose3 = [robot2Pose(1:2,:)];
             robot2.Obstacle = obstaclePose2;
             
@@ -206,12 +228,40 @@ while n <= samples
                     robot2OnlinePose(:,1+bufferSize:end);
                 robot2OnlinePose(:,end) = robot2.CurrentPose;
     
-                estmRobot3_raw = predict(multiSliceNet,robot2OnlinePose(1:3,:)');
-                multiSliceNet.resetState();
-                % estmRobot3 = estmRobot3';
+                % Normalize input data before prediction
+                robot2OnlinePose_input = robot2OnlinePose(1:3,:)';  % Transpose to get correct dimensions
+                robot2OnlinePose_norm = (robot2OnlinePose_input - muX_train) ./ sigmaX_train;
                 
-                % estm_pos3 = [estm_pos3, [estmRobot3(1); estmRobot3(2)]];
-            % estm_pos3 = [estm_pos3, robot3Pose(1:2,:)];
+                % Predict with normalized input
+                estmRobot3_norm = predict(multiSliceNet, robot2OnlinePose_norm);
+                
+                % Denormalize the output
+                estmRobot3_raw = estmRobot3_norm .* sigmaT_train + muT_train;
+                
+                % Speed filtering before FILO buffer
+                % Calculate actual robot3 speed
+                currentRobot3Pos = robot3Pose(1:2);
+                if ~isempty(prevRobot3Pos) && t > 0
+                    actualRobot3Speed = norm(currentRobot3Pos - prevRobot3Pos) / sampleTime;
+                    
+                    % Only apply filtering when robot3 is moving slowly (near end of trajectory)
+                    if actualRobot3Speed < minSpeedForFiltering && ~isempty(prevPredictedPos)
+                        % Calculate predicted speed
+                        predictedSpeed = norm(estmRobot3_raw' - prevPredictedPos) / sampleTime;
+                        speedThreshold = speedThresholdMultiplier * actualRobot3Speed;
+                  %       speedThreshold = speedThresholdMultiplier ;
+                        % If predicted speed exceeds threshold, use previous prediction
+                        if predictedSpeed > speedThreshold
+                            estmRobot3_raw = prevPredictedPos';
+                            fprintf('Filtered prediction due to excessive speed: %.2f > %.2f\n', ...
+                                predictedSpeed, speedThreshold);
+                        end
+                    end
+                end
+                
+                % Store current positions for next iteration
+                prevRobot3Pos = currentRobot3Pos;
+                prevPredictedPos = estmRobot3_raw';
                 if k <= filo_length
                     buffer(k,:) = estmRobot3_raw;
                     buffer_sum = sum(buffer,1);
@@ -224,6 +274,29 @@ while n <= samples
                     estmRobot3 = buffer_sum / filo_length;  % Full window average
                     
                 end
+                
+                % % Speed filtering after FILO buffer
+                % % Apply similar filtering to the final filtered result
+                % if ~isempty(prevRobot3Pos) && ~isempty(prevFilteredPos)
+                %     actualRobot3Speed = norm(currentRobot3Pos - prevRobot3Pos) / sampleTime;
+                % 
+                %     % Only apply filtering when robot3 is moving slowly
+                %     if actualRobot3Speed < minSpeedForFiltering
+                %         % Calculate filtered prediction speed
+                %         filteredSpeed = norm(estmRobot3 - prevFilteredPos) / sampleTime;
+                %         speedThreshold = speedThresholdMultiplier * actualRobot3Speed;
+                % 
+                %         % If filtered speed exceeds threshold, use previous filtered result
+                %         if filteredSpeed > speedThreshold
+                %             estmRobot3 = prevFilteredPos;
+                %             fprintf('Filtered final result due to excessive speed: %.2f > %.2f\n', ...
+                %                 filteredSpeed, speedThreshold);
+                %         end
+                %     end
+                % end
+                % 
+                % % Store current filtered position for next iteration
+                % prevFilteredPos = estmRobot3;
       
                 estmRobot3 = estmRobot3';
                 obstaclePosAll = [robot2Pose(1:2,:), estmRobot3];
@@ -231,35 +304,21 @@ while n <= samples
 
             % obstaclePosAll = estmRobot3;
             % obstaclePosAll = [robot2Pose(1:2,:)];
-            robot1.Obstacle = [obstaclePosAll, robot4Pose(1:2,:)];
+            robot1.Obstacle = obstaclePosAll;
             robot1.artificial_potential_field(sampleTime, 1, 1.2);
-            robot4.Obstacle = [obstaclePosAll, robot1Pose(1:2,:)];
-            robot4.artificial_potential_field(sampleTime, 1, 1.2);
             
             if calcDist(robot1.CurrentCoord, robot2.CurrentCoord) < robot1.SafeRadius ||...
-                calcDist(robot1.CurrentCoord, robot3.CurrentCoord) < robot1.SafeRadius ||...
-                calcDist(robot1.CurrentCoord, robot4.CurrentCoord) < robot1.SafeRadius ||...
-                calcDist(robot4.CurrentCoord, robot2.CurrentCoord) < robot4.SafeRadius || ...
-                calcDist(robot4.CurrentCoord, robot1.CurrentCoord) < robot4.SafeRadius || ...
-                calcDist(robot4.CurrentCoord, robot3.CurrentCoord) < robot4.SafeRadius
-                collision_conditions_mz{n,9} = 1;
+                calcDist(robot1.CurrentCoord, robot3.CurrentCoord) < robot1.SafeRadius
+                collision_conditions_mz{n,7} = 1;
                 break;
             end
             % If any agent reaches the goal then the simulation stops
-            if robot1.atGoal() && robot4.atGoal() 
+            if robot1.atGoal()
                 break;
             elseif robot2.atGoal()
                 robot2.LinearVelocity = 0;
-                robot2.AngularVelocity = 0;
             elseif robot3.atGoal()
                 robot3.LinearVelocity = 0;
-                robot3.AngularVelocity = 0;
-            elseif robot1.atGoal() && ~robot4.atGoal()
-                robot1.LinearVelocity = 0;
-                robot1.AngularVelocity = 0;
-            elseif robot4.atGoal() && ~robot1.atGoal()
-                robot4.LinearVelocity = 0;
-                robot4.AngularVelocity = 0;
             end
             
 %%
@@ -271,7 +330,6 @@ while n <= samples
                 robot2.plotRobot(1); % adjust the frame size as needed
                 robot3.plotRobot(1);
                 robot1.plotRobot(1);
-                robot4.plotRobot(1);
         
                 hold on
                 % plot(robot1.Start(1),robot1.Start(2),'go','MarkerSize',10,'MarkerFaceColor','g')
@@ -281,21 +339,19 @@ while n <= samples
                 %     'Color',[1,50,32]/255,'LineWidth',1);   % Orange: [1 0.5 0]
                 scatter(poses2(1,1:2:end),poses2(2,1:2:end),800,robot2.LightColor(1:3));
                 scatter(poses3(1,1:2:end),poses3(2,1:2:end),800,robot3.LightColor(1:3));
-                scatter(poses4(1,1:2:end),poses4(2,1:2:end),800,robot4.LightColor);
                 % plot(poses3(1,:),poses3(2,:),'-',...
                 %     'Color',[0.5,0.5,0.5],'LineWidth',1);
                 try
                     % plot(estm_plot(1,:),estm_plot(2,:),'--',...
                     %     'Color',[0 0 1],'LineWidth',1)
                     
-                    if calcDist(estmRobot3, robot3.CurrentCoord) < robot1.SafeRadius || calcDist(estmRobot3, robot3.CurrentCoord) < robot4.SafeRadius
+                  % if calcDist(estmRobot3, robot3.CurrentCoord) < robot1.SafeRadius
                         estm_pos3 = [estm_pos3, estmRobot3];
                         % scatter(estmRobot3(1), estmRobot3(2),120,'blue','square','filled')
                         % scatter(estm_pos3(1,1:2:end),estm_pos3(2,1:2:end),800,'blue')
                     % else
                         % scatter(estmRobot3(1), estmRobot3(2),120,'cyan','square','filled')
-                    end
-
+                 %  end
                 catch 
                     
                 end
@@ -306,6 +362,11 @@ while n <= samples
                 xlim([-5, 20]);
                 ylim([-5, 20]);
                 drawnow
+
+                if save_video
+                   frame = getframe(gcf);
+                   writeVideo(v, frame);
+                end
             
 %%
             end
@@ -316,6 +377,12 @@ while n <= samples
 %     if ~robot2.atGoal()
 %         disp('Robot did not reach the goal within the simulation time.');
 %     end
+    % 关闭当前样本的视频文件
+    if save_video
+        close(v);
+        fprintf('Video saved: %s\n', video_filename);
+    end
+    
     n = n + 1;
     augmented_pq_r4{n,1} = poses2;
     augmented_pq_r4{n,2} = poses3;
@@ -324,12 +391,20 @@ while n <= samples
     end
     % allWaypoints_pq_r2{n,3} = estm_poses3;
     catch ME
+        % 如果发生错误，也要关闭视频文件
+        if save_video && exist('v', 'var') && isvalid(v)
+            close(v);
+            fprintf('Video saved (with error): %s\n', video_filename);
+        end
         fprintf('An error occurred: %s\n', ME.message);
         fprintf('Skipped, new random start generated.\n')
         fprintf('Completed Trials: %d\n', n-1)
     end
 end
 %%
+
+
+
 if record_collision_condition
     save('Data/SimulationData/demo_mz.mat','collision_conditions_mz');
 end
@@ -351,31 +426,3 @@ collision_rate_mz = num_collide_mz / samples
 % poses3InWindow = poses3(:,timeIndices);
 % prediction_error = poses3InWindow(1:2,:) - estm_plot(1:2,:);
 % avg_error = mean(sqrt(prediction_error(1,:).^2 + prediction_error(2,:).^2))
-function [egoStart, egoGoal] = generateEgoRobotPatha(partnerStart, allyStart, enemyStart, interceptPoint, test_site_size, safeRadius)
-    max_attempts = 10000;
-    for attempt = 1:max_attempts
-        % Calculate distance from robot2Start to interceptPoint
-        distance = calcDist(interceptPoint, allyStart);
-        
-        vect_to_intercept = interceptPoint - partnerStart;
-        vect_to_intercept = vect_to_intercept / norm(vect_to_intercept);
-        
-        angle = -pi * rand();
-        egoStart = partnerStart + 2 * distance * vect_to_intercept * ...
-            [cos(angle), -sin(angle); sin(angle), cos(angle)];
-        
-        
-        % Check if egoStart is far enough from both robot2Start and robot3Start
-        if norm(egoStart - allyStart) > safeRadius && norm(egoStart - enemyStart) > safeRadius && norm(egoStart-partnerStart) > safeRadius
-            % Calculate egoGoal
-            dir = interceptPoint - egoStart;
-            egoGoal = interceptPoint + dir;
-            
-            % Check if egoGoal is within the test site
-            if all(egoGoal >= 0 & egoGoal <= test_site_size)
-                return
-            end
-        end
-    end
-    error('Unable to find a suitable configuration for ego robot after %d attempts', max_attempts);
-end

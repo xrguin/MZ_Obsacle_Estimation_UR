@@ -5,7 +5,7 @@ clear
 close all
 %%
 % Test Settings
-annimation = true;
+annimation = false;
 simulation = true;
 record_data = false;
 %%
@@ -19,7 +19,7 @@ n = 0;
 
 turn_threshold = 0.2;
 recording = false;
-samples = 7000;
+samples = 1000;
 
 apf_pq_r4 = cell(samples,2);
 detection_radius = 15;
@@ -226,14 +226,14 @@ while n < samples
 end
 end
 %%
-
+record_data = true;
 if record_data
-    save("strict_apf_ally_turn.mat","apf_pq_r4")
+    save("strict_apf_ally_turn_1.mat","apf_pq_r4")
 end% Plot the results for 1 simulation for future use
 %%
 
-load('strict_apf_ally_turn.mat','apf_pq_r4')
-plotSample = 7000;
+load('strict_apf_ally_turn_1.mat','apf_pq_r4')
+plotSample = 1000;
 poses2_1 = apf_pq_r4{plotSample,1};
 poses3_1 = apf_pq_r4{plotSample,2};
 robot2_1 = MbRobot;
@@ -250,7 +250,6 @@ plot(poses2_1(1,:),poses2_1(2,:),'-',...
                 'Color',[0,1,0],'LineWidth',1);   % Orange: [1 0.5 0]
 hold on
 plot(poses3_1(1,:),poses3_1(2,:),'-',...
-
                 'Color',[0,0,1],'LineWidth',1);
 plot(robot2.Start(1),robot2.Start(2),'ko','MarkerSize',10,'MarkerFaceColor','g')
 plot(robot2.Goal(1),robot2.Goal(2),'kp','MarkerSize',10,'MarkerFaceColor','g')
